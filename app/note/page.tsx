@@ -278,7 +278,7 @@ export default function Home() {
           : card
       )
     );
-  };  
+  };
 
 
   return (
@@ -354,15 +354,17 @@ export default function Home() {
 
         </div>
 
-        <div className="fixed bottom-4 right-4">
-          <Image
-            width={50}
-            height={50}
-            src="/plus.png"
-            alt="Add Card"
-            onClick={handleCreateCard}
-          />
-        </div>
+        {filterType !== 'completed' && (
+          <div className="fixed bottom-4 right-4">
+            <Image
+              width={50}
+              height={50}
+              src="/plus.png"
+              alt="Add Card"
+              onClick={handleCreateCard}
+            />
+          </div>
+        )}
 
         {isPopupOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40">
