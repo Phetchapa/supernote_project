@@ -271,20 +271,14 @@ export default function Home() {
     cardId: string; title: string; content: string; cardColor: string; date: string; userId: string; isEditing: boolean
   }
   const handleUpdateCard = (updatedCard: CardProps) => {
-    setCards(prevCards => {
-      // ถ้า status เป็น false ให้กรองการ์ดนั้นออก
-      if (updatedCard.status === true) {
-        return prevCards.filter(card => card.cardId !== updatedCard.cardId);
-      }
-
-      // ถ้า status เป็น true ให้ทำการอัปเดตการ์ด
-      return prevCards.map(card =>
+    setCards(prevCards =>
+      prevCards.map(card =>
         card.cardId === updatedCard.cardId
           ? { ...card, ...updatedCard }
           : card
-      );
-    });
-  };
+      )
+    );
+  };  
 
 
   return (
