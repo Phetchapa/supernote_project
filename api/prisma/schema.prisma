@@ -1,0 +1,35 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId // ใช้ id เป็น _id ใน MongoDB
+  userId   String @unique @db.ObjectId // ฟิลด์ userId จะใช้ ObjectId แต่ค่าต้องจัดการด้วยโค้ด
+  email    String @unique
+  password String
+
+  notes Note[] // ความสัมพันธ์แบบ one-to-many ระหว่าง User และ Note
+}
+
+model Note {
+  id                     String   @id @default(auto()) @map("_id") @db.ObjectId
+  noteId                 String   @unique @db.ObjectId
+  title                  String
+  content                String
+  color                  String
+  date                   DateTime
+  status                 Boolean
+  notificationTimeStatus Boolean
+  notificationTime       DateTime
+  userId                 String   @db.ObjectId
+
+  user User @relation(fields: [userId], references: [id]) // ความสัมพันธ์กับ User
+}
+
+// npm install express @prisma/client
+// npx prisma generate
