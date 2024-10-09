@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import { useRouter } from 'next/navigation';
@@ -12,6 +12,8 @@ interface HeaderProps {
     handleClearSearch: () => void;
     isProfilePopupOpen: boolean;
     setIsProfilePopupOpen: (open: boolean) => void;
+    isAuthorized: boolean;
+    setIsAuthorized: (authorized: boolean) => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -21,17 +23,29 @@ const Header: React.FC<HeaderProps> = ({
     searchTerm,
     setSearchTerm,
     isProfilePopupOpen,
-    setIsProfilePopupOpen
+    setIsProfilePopupOpen,
+    isAuthorized,
+    setIsAuthorized,
 }) => {
     const router = useRouter();
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // ฟังก์ชันสำหรับจัดการ popup
-    const handleProfileClick = () => {
-        setIsProfilePopupOpen(!isProfilePopupOpen);
+    // Function to revoke Google token
+    const revokeGoogleToken = () => {
+        if (isAuthorized && window.gapi && window.gapi.client) {
+            const token = window.gapi.client.getToken();
+            if (token) {
+                window.google.accounts.oauth2.revoke(token.access_token, () => {
+                    console.log('Google Token revoked.');
+                });
+                window.gapi.client.setToken(''); // Clear the token from gapi client
+                localStorage.removeItem('access_token'); // Remove token from localStorage if stored
+                setIsAuthorized(false); // Update authorization state
+            }
+        }
     };
 
-    // ฟังก์ชันสำหรับ logout
+    // Function for logging out
     const handleLogout = () => {
         Swal.fire({
             icon: 'success',
@@ -41,20 +55,24 @@ const Header: React.FC<HeaderProps> = ({
             customClass: {
                 confirmButton: 'text-white',
             },
-        });
-        const fetchData = async () => {
-            try {
-                await axios.get(`${process.env.NEXT_PUBLIC_WEB}/api/removeCookie`);
-            } catch (error) {
-                console.error('There was an error logging out:', error);
-            }
-        };
-        fetchData().then(() => {
-            router.push('/');
+        }).then(() => {
+            // Step 1: Revoke Google Token if authorized
+            revokeGoogleToken();
+
+            // Step 2: Remove session cookie and log out from the application
+            const fetchData = async () => {
+                try {
+                    await axios.get(`${process.env.NEXT_PUBLIC_WEB}/api/removeCookie`);
+                    router.push('/');
+                } catch (error) {
+                    console.error('There was an error logging out:', error);
+                }
+            };
+            fetchData();
         });
     };
 
-    // ดึงอีเมลของผู้ใช้
+    // Fetch user email
     useEffect(() => {
         const fetchUserEmail = async () => {
             try {
@@ -75,22 +93,6 @@ const Header: React.FC<HeaderProps> = ({
         inputRef.current?.focus();
     };
 
-    useEffect(() => {
-        const fetchUserEmail = async () => {
-          try {
-            const response = await axios.get(`${process.env.NEXT_PUBLIC_API}/user/${userId}/email`, { withCredentials: true });
-            setUserEmail(response.data.email);
-          } catch (error) {
-            console.error('Error fetching user email:', error);
-          }
-        };
-      
-        if (userId) {
-          fetchUserEmail();
-        }
-      }, [userId]);
-      
-
     return (
         <div className="w-full">
             <div className="absolute top-4 right-4 flex items-center space-x-4">
@@ -103,7 +105,7 @@ const Header: React.FC<HeaderProps> = ({
 
                 <div className="relative">
                     <div
-                        onClick={handleProfileClick}
+                        onClick={() => setIsProfilePopupOpen(!isProfilePopupOpen)}
                         className="w-10 h-10 bg-gray-400 rounded-full flex justify-center items-center cursor-pointer"
                     >
                         <span className="text-white font-bold">

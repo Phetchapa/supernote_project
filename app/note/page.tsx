@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import Card from "./components/card";
-import Header from './components/Header';
+import Header from './components/header';
 import Image from "next/image";
 import Swal from 'sweetalert2';
 import axios from 'axios';
@@ -14,6 +14,11 @@ import { faCircleCheck, faBell, faBellSlash } from '@fortawesome/free-solid-svg-
 import LoadingSpinner from './components/LoadingSpinner';
 import { faCircle as faCircleSolid } from '@fortawesome/free-solid-svg-icons'; // Solid circle
 import { faCircle as faCircleRegular } from '@fortawesome/free-regular-svg-icons';
+
+const CLIENT_ID = process.env.NEXT_PUBLIC_CLIENT_ID; // Replace with your actual client ID
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY;
+const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
+const SCOPES = 'https://www.googleapis.com/auth/calendar';
 
 export default function Home() {
   const router = useRouter();
@@ -28,6 +33,84 @@ export default function Home() {
   const [isProfilePopupOpen, setIsProfilePopupOpen] = useState(false); // สถานะของป๊อปอัป
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm); // สร้าง state แยกเพื่อใช้กับ debounce
+
+  //-----สำหรับ Google Calendar
+  const [addToGoogleCalendar, setAddToGoogleCalendar] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [gapiInited, setGapiInited] = useState(false);
+  const [gisInited, setGisInited] = useState(false);
+  const [tokenClient, setTokenClient] = useState<any>(null);
+  const [endTime, setEndTime] = useState(
+    new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 16) // Default to 1 hour after the notificationTime
+  );
+  useEffect(() => {
+    const loadGapi = () => {
+      if (window.gapi) {
+        window.gapi.load('client', initializeGapiClient);
+      }
+    };
+
+    const initializeGapiClient = async () => {
+      if (window.gapi) {
+        await window.gapi.client.init({
+          apiKey: API_KEY,
+          discoveryDocs: [DISCOVERY_DOC],
+        });
+        const storedToken = localStorage.getItem('access_token');
+        if (storedToken) {
+          window.gapi.client.setToken({ access_token: storedToken });
+          setIsAuthorized(true);
+        }
+        setGapiInited(true);
+      }
+    };
+
+    const loadGis = () => {
+      if (window.google) {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: (response: TokenResponse) => {  // Typed response parameter
+            if (response.error) {
+              console.error(response.error);
+            } else {
+              localStorage.setItem('access_token', response.access_token);
+              setIsAuthorized(true);
+            }
+          },
+        });
+        setTokenClient(client);
+        setGisInited(true);
+      }
+    };
+
+    const loadScripts = () => {
+      // Load gapi script
+      const gapiScript = document.createElement('script');
+      gapiScript.src = 'https://apis.google.com/js/api.js';
+      gapiScript.async = true;
+      gapiScript.defer = true;
+      gapiScript.onload = loadGapi;
+      document.body.appendChild(gapiScript);
+
+      // Load GIS script
+      const gisScript = document.createElement('script');
+      gisScript.src = 'https://accounts.google.com/gsi/client';
+      gisScript.async = true;
+      gisScript.defer = true;
+      gisScript.onload = loadGis;
+      document.body.appendChild(gisScript);
+    };
+
+    loadScripts();
+  }, []);
+
+  const handleAuthClick = () => {
+    if (tokenClient) {
+      tokenClient.requestAccessToken({ prompt: '' });
+    }
+  };
+
   const handleClearSearch = () => {
     setSearchTerm('');
     inputRef.current?.focus(); // ให้ focus กลับไปยัง input หลังจากเคลียร์ searchTerm
@@ -61,6 +144,7 @@ export default function Home() {
   const [selectedColor, setSelectedColor] = useState('bg-white');
   const [filterType, setFilterType] = useState<'all' | 'uncompleted' | 'completed'>('all');
 
+  
   function handleColorChange(color: string) {
     setCardColor(color);
     setSelectedColor(color);
@@ -84,12 +168,7 @@ export default function Home() {
     let selectedDateTime = new Date(notificationTime);
 
     if (notificationTimeStatus && notificationTime) {
-
-
       const currentDateTime = new Date();
-      // console.log('currentDateTime:', currentDateTime);
-      // console.log('selectedDateTime:', selectedDateTime);
-      // console.log('currentDateTime.getTime():', new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 16));
 
       // ถ้าผู้ใช้เลือกวันเวลาในอดีต
       if (selectedDateTime < currentDateTime) {
@@ -119,6 +198,7 @@ export default function Home() {
       return;
     }
 
+    // Step 1: Save the card
     try {
       const response = await axios.post(`${process.env.NEXT_PUBLIC_API}/notes`, {
         title: title,
@@ -126,7 +206,7 @@ export default function Home() {
         color: cardColor,
         status: status,
         notificationTimeStatus: notificationTimeStatus,
-        notificationTime: new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString(), // ส่งเป็น ISO string ไปยัง backend
+        notificationTime: selectedDateTime.toISOString(), // ส่งเป็น ISO string ไปยัง backend
         userId: userId
       }, {
         withCredentials: true
@@ -134,7 +214,7 @@ export default function Home() {
 
       const newId = await response.data.noteId;
 
-      // แปลง notificationTime จาก string เป็น Date object ก่อนเก็บใน state
+      // Update the state with the new card
       setCards([
         {
           cardId: newId,
@@ -147,29 +227,83 @@ export default function Home() {
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
-            hour12: false, // ถ้าคุณต้องการใช้เวลาแบบ 24 ชั่วโมง
-            timeZone: 'Asia/Bangkok', // ตั้งค่าโซนเวลาเป็นประเทศไทย
-          }).format(new Date()), // แปลงฟอร์แมตของวันที่
+            hour12: false,
+            timeZone: 'Asia/Bangkok',
+          }).format(new Date()),
           status: status,
           notificationTimeStatus: notificationTimeStatus,
           notificationTime: new Date(notificationTime), // แปลงเป็น Date object ก่อนเก็บ
           userId: userId,
           isEditing: false
         },
-        ...cards // นำการ์ดใหม่มาไว้ที่ตำแหน่งแรก
+        ...cards
       ]);
-
-
     } catch (error) {
-      console.error('There was an error fetching the notes:', error);
+      console.error('There was an error saving the note:', error);
     }
 
+    // Step 2: If "Add to Google Calendar" is checked and authorized, create the Google Calendar event
+    if (addToGoogleCalendar && isAuthorized) {
+      try {
+        const selectedEndTime = new Date(endTime); // Use the selected end time
+
+        const eventData = {
+          summary: title,
+          description: content,
+          start: {
+            dateTime: new Date(notificationTime).toISOString(),
+            timeZone: 'Asia/Bangkok',
+          },
+          end: {
+            dateTime: selectedEndTime.toISOString(), // Use the selected end time
+            timeZone: 'Asia/Bangkok',
+          },
+          attendees: [],
+          reminders: {
+            useDefault: false,
+            overrides: [
+              { method: 'email', minutes: 24 * 60 },  // Email reminder 24 hours before
+              { method: 'popup', minutes: 10 },       // Popup reminder 10 minutes before
+            ],
+          },
+        };
+
+        const request = await window.gapi.client.calendar.events.insert({
+          calendarId: 'primary',
+          resource: eventData,
+        });
+        const response = await request;
+
+        Swal.fire({
+          icon: 'success',
+          title: 'Google Calendar Event Created!',
+          text: `Event created: ${response.result.htmlLink}`,
+          confirmButtonColor: '#38bdf8',
+          customClass: {
+            confirmButton: 'text-white',
+          },
+        });
+      } catch (error) {
+        console.error('Google Calendar API Error:', error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'There was an error creating the Google Calendar event.',
+          confirmButtonColor: '#38bdf8',
+          customClass: {
+            confirmButton: 'text-white',
+          },
+        });
+      }
+    }
+
+    // Step 3: Reset form fields
     setTitle("");
     setContent("");
     setCardColor('bg-white');
     setStatus(false);
     setNotificationTimeStatus(false);
-    setNotificationTime(new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 16)); // รีเซ็ต notificationTime เป็นค่าเริ่มต้น
+    setNotificationTime(new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 16));
     setIsPopupOpen(false);
   }
 
@@ -278,7 +412,22 @@ export default function Home() {
           : card
       )
     );
-  };
+  };  
+
+  useEffect(() => {
+    if (!notificationTimeStatus) {
+      setAddToGoogleCalendar(false); // ถ้า notificationTimeStatus เป็น false ให้ปิดการเลือก addToGoogleCalendar ด้วย
+    }
+  }, [notificationTimeStatus]); // ติดตามการเปลี่ยนแปลงของ notificationTimeStatus
+
+  useEffect(() => {
+    if (addToGoogleCalendar) {
+      // Set endTime to the current time + 7 hours whenever "Add to Google Calendar" is checked
+      const currentTime = new Date();
+      const updatedTime = new Date(currentTime.getTime() + 7 * 60 * 60 * 1000); // Add 7 hours
+      setEndTime(updatedTime.toISOString().slice(0, 16)); // Reset to the updated time
+    }
+  }, [addToGoogleCalendar]);
 
 
   return (
@@ -288,15 +437,18 @@ export default function Home() {
       <div className="flex flex-col items-center justify-start min-h-screen bg-gray-100">
         {/* เรียกใช้ Header โดยส่ง userId, searchTerm และ setSearchTerm ไปให้ */}
         <Header
-          userId={userId}
-          userEmail={userEmail}
-          setUserEmail={setUserEmail}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          handleClearSearch={handleClearSearch}
-          isProfilePopupOpen={isProfilePopupOpen}
-          setIsProfilePopupOpen={setIsProfilePopupOpen} // ส่งฟังก์ชันนี้ไปด้วย
-        />
+    userId={userId}
+    userEmail={userEmail}
+    setUserEmail={setUserEmail}
+    searchTerm={searchTerm}
+    setSearchTerm={setSearchTerm}
+    handleClearSearch={handleClearSearch}
+    isProfilePopupOpen={isProfilePopupOpen}
+    setIsProfilePopupOpen={setIsProfilePopupOpen}
+    isAuthorized={isAuthorized}          // Add isAuthorized state
+    setIsAuthorized={setIsAuthorized}    // Add setIsAuthorized handler
+/>
+
 
         <div className="flex justify-center items-center w-full px-8">
           <button
@@ -338,11 +490,9 @@ export default function Home() {
                 content={card.content}
                 cardColor={card.cardColor}
                 date={card.date}
-
                 status={card.status}
                 notificationTimeStatus={card.notificationTimeStatus}
                 notificationTime={card.notificationTime}
-
                 userId={card.userId}
                 onDelete={handleDeleteCard}
                 onUpdate={handleUpdateCard}
@@ -374,7 +524,7 @@ export default function Home() {
                 <div className='flex-grow'>
                   {/* Checkbox สำหรับเลือกเปิด/ปิด Notification Time */}
                   <div className='flex justify-between items-center min-h-12'>
-                    <div className='flex justify-center items-center gap-2'>
+                    <div className='flex justify-center items-center gap-2 relative'>
                       <input
                         type="checkbox"
                         id="notificationTimeStatus"
@@ -384,21 +534,23 @@ export default function Home() {
                       />
                       <label
                         htmlFor="notificationTimeStatus"
-                        className={`relative block w-[60px] h-[30px] rounded-full cursor-pointer transition duration-300 ${notificationTimeStatus ? 'bg-red-600' : 'bg-[#ebebeb]'}`}
+                        className={`block w-12 h-7 rounded-full cursor-pointer transition-all duration-300 ${notificationTimeStatus ? 'bg-red-600' : 'bg-gray-300'}`}
                       >
-                        <div className={`absolute w-[24px] h-[24px] top-[3px] left-[3px] bg-white rounded-full shadow-md transition-transform duration-300 ${notificationTimeStatus ? 'translate-x-[30px]' : ''}`}></div>
-
-                        {!notificationTimeStatus ? (
-                          <FontAwesomeIcon
-                            icon={faBellSlash}
-                            className="absolute w-[18px] top-[6px] left-[6px] text-gray-500" // Positioned on the left
-                          />
-                        ) : (
-                          <FontAwesomeIcon
-                            icon={faBell}
-                            className="absolute w-[18px] top-[6px] right-[6px] text-gray-500" // Positioned on the right
-                          />
-                        )}
+                        <div
+                          className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full shadow-md transform transition-all duration-300 ${notificationTimeStatus ? 'translate-x-5' : ''}`}
+                        >
+                          {notificationTimeStatus ? (
+                            <FontAwesomeIcon
+                              icon={faBell}
+                              className="absolute w-[14px] h-[14px] text-gray-500 top-1 right-1"
+                            />
+                          ) : (
+                            <FontAwesomeIcon
+                              icon={faBellSlash}
+                              className="absolute w-[14px] h-[14px] text-gray-500 top-1 left-1"
+                            />
+                          )}
+                        </div>
                       </label>
 
                       <label htmlFor="notificationTimeStatus" className="text-sm text-gray-600">
@@ -407,6 +559,7 @@ export default function Home() {
                     </div>
                     {notificationTimeStatus && (
                       <div className='flex justify-center items-center gap-2'>
+                        <label htmlFor="startTime" className="text-sm text-gray-600">Start Time : </label>
                         <input
                           type="datetime-local"
                           id="notificationTime"
@@ -422,6 +575,54 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+                  {notificationTimeStatus && (
+                    <div className='flex justify-between items-center min-h-12 mt-2'>
+                      <div className='flex justify-center items-center gap-2'>
+                        {/* Custom switch for "Add to Google Calendar" */}
+                        <div className="relative">
+                          <input
+                            type="checkbox"
+                            id="addToGoogleCalendar"
+                            className="sr-only"
+                            checked={addToGoogleCalendar}
+                            onChange={() => setAddToGoogleCalendar(!addToGoogleCalendar)}
+                          />
+                          <label
+                            htmlFor="addToGoogleCalendar"
+                            className={`block w-12 h-7 rounded-full cursor-pointer transition-all duration-300 ${addToGoogleCalendar ? 'bg-sky-400' : 'bg-gray-300'}`}
+                          >
+                            <div
+                              className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full shadow-md transform transition-all duration-300 ${addToGoogleCalendar ? 'translate-x-5' : ''}`}
+                            />
+                          </label>
+                        </div>
+                        <label htmlFor="addToGoogleCalendar" className="text-sm text-gray-600">
+                          Add to Google Calendar Event
+                        </label>
+                      </div>
+                      {addToGoogleCalendar && (
+                        <div>
+                          {!isAuthorized ? (
+                            <button onClick={handleAuthClick} className="bg-sky-400 text-white px-3 py-2 rounded-lg hover:bg-sky-500">
+                              Sign in to Google
+                            </button>
+                          ) : (
+                            <div>
+                              <label htmlFor="endTime" className="text-sm text-gray-600">End Time : </label>
+                              <input
+                                type="datetime-local"
+                                id="endTime"
+                                value={endTime}
+                                min={notificationTime} // Ensure the end time is not before the notification time
+                                onChange={(e) => setEndTime(e.target.value)}
+                                className="p-2 border border-gray-300 rounded-lg"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Title Input */}
                   <input
